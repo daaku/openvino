@@ -30,8 +30,8 @@ const (
 	I64 = C.I64
 )
 
-// ElementType is the OpenVINO element type enum, aliased so the rest of the
-// module does not need to import C.
+// ElementType is the OpenVINO element type enum, aliased so callers do not
+// need to import C.
 type ElementType = C.ov_element_type_e
 
 // status makes one OpenVINO call and turns a failure into an error. The
