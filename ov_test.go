@@ -392,3 +392,44 @@ func TestReadCompileModel(t *testing.T) {
 	}
 	cm.Close()
 }
+
+func TestReshape(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "add.xml")
+	if err := os.WriteFile(path, []byte(dynamicAddIR), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	core, err := SharedCore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := core.ReadModel(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.Close()
+	if err := model.Reshape(map[int][]int64{0: {1, 7}, 1: {1, 7}}); err != nil {
+		t.Fatal(err)
+	}
+	cm, err := core.CompileModel(model, "CPU", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cm.Close()
+	for _, name := range []string{"a", "sum"} {
+		var s PortShape
+		if name == "a" {
+			s, err = cm.Input(name)
+		} else {
+			s, err = cm.Output(name)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Dim(1) != 7 {
+			t.Fatalf("%s dim 1 = %d, want 7", name, s.Dim(1))
+		}
+	}
+	if err := model.Reshape(map[int][]int64{0: {1, 3}, 1: {1, 4}}); err == nil {
+		t.Fatal("reshaping the inputs of an add to different lengths did not fail")
+	}
+}

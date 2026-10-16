@@ -2,7 +2,8 @@
 
 cgo bindings for the OpenVINO C API. `ov.go` is the only cgo file. It wraps
 just enough of the C API to load models, run inference and move tensor data,
-for whispy (Parakeet speech to text) and eg2npu (EmbeddingGemma 2 embeddings).
+for whispy (Parakeet speech to text), eg2npu (EmbeddingGemma 2 embeddings)
+and bolo (Qwen3-TTS).
 Tensor data is copied in and out of OpenVINO owned memory: never hand C a
 pointer to Go memory that outlives the call, and prefer Go over C for anything
 that is not an API call.
@@ -41,8 +42,15 @@ that is not an API call.
 - `PortShape` reports dynamic dimensions as -1 and `Dim` as 0, so callers pick
   their own fallback instead of tripping over OpenVINO's "to_shape was called
   on a dynamic shape" error.
-- The bindings cannot build, reshape or export a model, or import a compiled
-  one. Callers that need a graph of their own write it as IR (eg2npu does) and
+- `Model.Reshape` fixes input shapes by input index
+  (`ov_model_reshape_by_port_indexes`) to static ones, which is how a graph
+  exported with dynamic dimensions is compiled for the NPU (bolo does this);
+  indices, because exported inputs often carry internal tensor names. The
+  partial shapes live in C memory for the call.
+- `Request.GetInputIndex` hands out the request's own input tensor, to fill in
+  place instead of binding a host tensor with `SetInputIndex`.
+- The bindings cannot build or export a model, or import a compiled one.
+  Callers that need a graph of their own write it as IR (eg2npu does) and
   rely on `CACHE_DIR` to skip compiling it again.
 
 ## Build and test

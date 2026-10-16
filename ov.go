@@ -260,6 +260,49 @@ func (m *Model) Close() {
 	m.p = nil
 }
 
+// Reshape fixes the shapes of the model's inputs, given by index, to static
+// shapes. The NPU compiles static shapes only, so a model exported with
+// dynamic dimensions is read, reshaped and then compiled.
+func (m *Model) Reshape(shapes map[int][]int64) error {
+	if m == nil || m.p == nil {
+		return serr.Errorf("reshape: model is closed")
+	}
+	n := len(shapes)
+	if n == 0 {
+		return nil
+	}
+	ports := (*C.size_t)(C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.size_t(0)))))
+	defer C.free(unsafe.Pointer(ports))
+	pshapes := (*C.ov_partial_shape_t)(C.calloc(C.size_t(n), C.size_t(unsafe.Sizeof(C.ov_partial_shape_t{}))))
+	defer C.free(unsafe.Pointer(pshapes))
+	portSlice := unsafe.Slice(ports, n)
+	shapeSlice := unsafe.Slice(pshapes, n)
+	created := 0
+	defer func() {
+		for i := range created {
+			C.ov_partial_shape_free(&shapeSlice[i])
+		}
+	}()
+	i := 0
+	for port, dims := range shapes {
+		if len(dims) == 0 {
+			return serr.Errorf("reshape input %d: zero rank shape", port)
+		}
+		portSlice[i] = C.size_t(port)
+		if err := status("partial shape create", func() C.ov_status_e {
+			return C.ov_partial_shape_create_static(C.int64_t(len(dims)),
+				(*C.int64_t)(unsafe.Pointer(&dims[0])), &shapeSlice[i])
+		}); err != nil {
+			return err
+		}
+		created++
+		i++
+	}
+	return status("reshape", func() C.ov_status_e {
+		return C.ov_model_reshape_by_port_indexes(m.p, ports, pshapes, C.size_t(n))
+	})
+}
+
 // CompileModel compiles a loaded model for device, taking the same properties
 // CompileWith does.
 func (c *Core) CompileModel(
@@ -661,6 +704,19 @@ func (r *Request) Get(name string) (*Tensor, error) {
 	var p *C.ov_tensor_t
 	if err := status("get "+name, func() C.ov_status_e {
 		return C.ov_infer_request_get_tensor(r.p, cName, &p)
+	}); err != nil {
+		return nil, err
+	}
+	return &Tensor{p: p}, nil
+}
+
+// GetInputIndex returns a new handle to an input tensor by index. Filling
+// the request's own tensor, rather than binding one with SetInputIndex,
+// lets a device plugin keep the memory it allocated for it.
+func (r *Request) GetInputIndex(i int) (*Tensor, error) {
+	var p *C.ov_tensor_t
+	if err := status("get input", func() C.ov_status_e {
+		return C.ov_infer_request_get_input_tensor_by_index(r.p, C.size_t(i), &p)
 	}); err != nil {
 		return nil, err
 	}
